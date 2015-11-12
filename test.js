@@ -18,10 +18,11 @@ function tick(time) {
 test.beforeEach(t => {
 	const child = fork('fixture.js', {silent: true});
 
-	const exit = new Promise((resolve, reject) =>
-		child.on('exit', code =>
-			(code > 0 ? reject : resolve)(code)
-		)
+	const exit = new Promise((resolve) =>
+		child.on('exit', code => {
+			console.log('exited with ' + code);
+			resolve(code);
+		})
 	);
 
 	t.context = {
@@ -34,11 +35,16 @@ test.beforeEach(t => {
 		handle: key => child.send({action: 'handle', key}),
 
 		// tell the child to reinstall loudRejection
-		reinstall: () => child.send({action: 'reinstall'}),
+		reinstall: (opts) => child.send({action: 'reinstall', opts}),
 
 		// kill the child (returns a promise for when the child is done)
 		kill: () => {
 			child.kill();
+			return exit;
+		},
+
+		exitWith: code => {
+			child.send({action: 'exitWith', code});
 			return exit;
 		},
 
@@ -172,4 +178,55 @@ test('will warn if installed twice', async t => {
 	await child.kill();
 
 	t.true(/WARN: loud rejection called more than once/.test(await child.stderr));
+});
+
+test('unhandledRejections will cause an exitCode of 1 by default', async t => {
+	const child = t.context;
+
+	child.rejectWithError('a', 'boo');
+	await tick(20);
+	var exitCode = child.exitWith(0);
+
+	t.is(await exitCode, 1);
+});
+
+test('exitCode can be manipulated', async t => {
+	const child = t.context;
+
+	child.reinstall({exitCode: 20});
+	child.rejectWithError('a', 'boo');
+	await tick(20);
+	var exitCode = child.exitWith(0);
+
+	t.is(await exitCode, 20);
+});
+
+test('will not manipulate non-zero exit codes', async t => {
+	const child = t.context;
+
+	child.reinstall({exitCode: 20});
+	child.rejectWithError('a', 'boo');
+	await tick(20);
+	var exitCode = child.exitWith(10);
+
+	t.is(await exitCode, 10);
+});
+
+test('will throw if opts.exitCode is less than 0', async t => {
+	const child = t.context;
+
+	child.reinstall({exitCode: -1});
+
+	t.true(await child.exit > 0);
+	t.true(/opts\.exitCode can't be a negative number/.test(await child.stderr));
+});
+
+test('will throw if opts.exitCode is modified more than once', async t => {
+	const child = t.context;
+
+	child.reinstall({exitCode: 2});
+	child.reinstall({exitCode: 3});
+
+	t.true(await child.exit > 0);
+	t.true(/two callers have tried to modify the exit code/.test(await child.stderr));
 });

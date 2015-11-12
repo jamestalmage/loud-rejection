@@ -26,8 +26,9 @@ process.on('message', function (message) {
 		case 'reject-error': return reject(message.key, new Error(message.message));
 		case 'reject-value': return reject(message.key, message.value);
 		case 'reject-nothing': return reject(message.key);
-		case 'reinstall': return loudRejection();
+		case 'reinstall': return loudRejection(message.opts);
 		case 'handle': return handle(message.key);
+		case 'exitWith': return process.exit(message.code);
 		default:
 			console.error('unknown message received: ', message);
 			process.exit(1);
